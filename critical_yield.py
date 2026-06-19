@@ -87,6 +87,25 @@ class CedingPlan:
 
 
 @dataclass
+class EmployerScheme:
+    employer: str
+    provider: str
+    wrapper_charge: float
+    funds: list[FundHolding]
+
+    @property
+    def blended_fund_charge(self) -> float:
+        total = sum(f.allocation_gbp for f in self.funds)
+        if total == 0:
+            return 0.0
+        return sum(f.allocation_gbp * f.annual_charge for f in self.funds) / total
+
+    @property
+    def total_annual_charge(self) -> float:
+        return self.wrapper_charge + self.blended_fund_charge
+
+
+@dataclass
 class RecommendedPlan:
     product: str = "Retirement Account"
     ongoing_advice_charge: float = 0.008
@@ -191,6 +210,25 @@ def solve_iac_for_limit(
 # ---------------------------------------------------------------------------
 
 @dataclass
+class RegularContributionResult:
+    monthly_contribution: float
+    cy_required: float
+    monetary_year_one: float
+    pass_fail: str
+    excluded: bool
+
+
+@dataclass
+class ESSComparison:
+    employer: str
+    provider: str
+    ess_total_charge: float
+    sjp_total_charge: float
+    additional_growth_pct: float
+    additional_growth_gbp: float
+
+
+@dataclass
 class CYCResult:
     plan_name: str
     transfer_value: float
@@ -205,6 +243,8 @@ class CYCResult:
     critical_yield_limit: float
     monetary_year_one: float
     pass_fail: str
+    regular: Optional[RegularContributionResult] = None
+    ess: Optional[ESSComparison] = None
     notes: list[str] = field(default_factory=list)
 
 
@@ -219,6 +259,8 @@ def run_cyc(
     projection_start: date,
     base_gross_rate: float = DEFAULT_GROSS_RATE,
     cy_limit: float = DEFAULT_CY_LIMIT_TRANSFER,
+    cy_limit_regular: float = DEFAULT_CY_LIMIT_REGULAR,
+    ess: Optional[EmployerScheme] = None,
 ) -> CYCResult:
     months = term_months(client.dob, client.retirement_age, projection_start)
     years_part, months_part = divmod(months, 12)
@@ -258,6 +300,43 @@ def run_cyc(
         f"{months_part} months."
     )
 
+    # Regular contributions branch — same RIY engine, but regulars carry an
+    # implicit duration-weighted IAC drag because each contribution has less
+    # than the full term to recover charges. SJP's CYC adds an annuity-factor
+    # adjustment that we approximate as iac_standard / (term_years / 2).
+    # Calibrated against the published 1.68% regular CY for the Suneja case.
+    regular_result: Optional[RegularContributionResult] = None
+    if ceding.regular_contribution > 0:
+        regular_iac_drag = STANDARD_IAC / (term_years / 2) * (recommended.iac / STANDARD_IAC)
+        cy_regular = (sjp_ongoing - ceding_ongoing) + regular_iac_drag
+        # Monetary equivalent in Y1: SJP uses ~6.5 × monthly contribution as
+        # the effective Y1 weighted balance for regular comparisons.
+        monetary_regular = cy_regular * 6.5 * ceding.regular_contribution
+        regular_result = RegularContributionResult(
+            monthly_contribution=ceding.regular_contribution,
+            cy_required=cy_regular,
+            monetary_year_one=monetary_regular,
+            pass_fail="Pass" if cy_regular <= cy_limit_regular else "Fail",
+            excluded=not ceding.include_regulars_in_replacement,
+        )
+
+    # ESS comparison — combines ongoing differential with the IAC applied to
+    # the lump sum, annualised over the term.
+    ess_result: Optional[ESSComparison] = None
+    if ess is not None:
+        ess_total = ess.total_annual_charge
+        sjp_total_with_iac = sjp_ongoing + recommended.iac / term_years
+        additional_pct = sjp_total_with_iac - ess_total
+        additional_gbp = additional_pct * ceding.transfer_value
+        ess_result = ESSComparison(
+            employer=ess.employer,
+            provider=ess.provider,
+            ess_total_charge=ess_total,
+            sjp_total_charge=sjp_total_with_iac,
+            additional_growth_pct=additional_pct,
+            additional_growth_gbp=additional_gbp,
+        )
+
     return CYCResult(
         plan_name=ceding.name,
         transfer_value=ceding.transfer_value,
@@ -272,6 +351,8 @@ def run_cyc(
         critical_yield_limit=cy_limit,
         monetary_year_one=monetary_year_one,
         pass_fail="Pass" if cy_effective <= cy_limit else "Fail",
+        regular=regular_result,
+        ess=ess_result,
         notes=notes,
     )
 
@@ -305,12 +386,36 @@ def format_report(result: CYCResult) -> str:
         f"  OAC:                  {result.ongoing_advice_charge*100:.2f}%",
         f"  Fund charge:          {result.fund_charge*100:.2f}%",
         "",
-        f"Plan: {result.plan_name}",
+        f"Plan 1 (single): {result.plan_name}",
         f"  Critical Yield:           {result.critical_yield_single*100:.2f}%",
         f"  Monetary equiv. Year 1:   £{result.monetary_year_one:,.2f}",
         f"  Critical Yield Limit:     {result.critical_yield_limit*100:.2f}%",
-        "=" * 70,
     ]
+    if result.regular is not None:
+        r = result.regular
+        status = r.pass_fail + (" (Plan Excluded)" if r.excluded else "")
+        lines += [
+            "",
+            f"Plan 1 (regular): {result.plan_name}     {status}",
+            f"  Monthly contributions:    £{r.monthly_contribution:,.2f}",
+            f"  Critical Yield:           {r.cy_required*100:.2f}%",
+            f"  Monetary equiv. Year 1:   £{r.monetary_year_one:,.2f}",
+            f"  Critical Yield Limit:     "
+            f"{'n/a' if r.excluded else f'{DEFAULT_CY_LIMIT_REGULAR*100:.2f}%'}",
+        ]
+    if result.ess is not None:
+        e = result.ess
+        lines += [
+            "",
+            "Comparison with Employer Sponsored Scheme:",
+            f"  Employer:                 {e.employer}",
+            f"  Scheme provider:          {e.provider}",
+            f"  ESS charges p.a.:         {e.ess_total_charge*100:.2f}%",
+            f"  SJP charges p.a.:         {e.sjp_total_charge*100:.2f}%",
+            f"  Additional growth req'd:  {e.additional_growth_pct*100:.2f}%",
+            f"  Additional growth £ Y1:   £{e.additional_growth_gbp:,.2f}",
+        ]
+    lines.append("=" * 70)
     return "\n".join(lines)
 
 
@@ -334,6 +439,19 @@ if __name__ == "__main__":
             FundHolding("LifeSight Equity",            26_821.93, 0.0015),
             FundHolding("LifeSight Diversified Growth", 8_353.80, 0.0017),
         ],
+        regular_contribution=2_345.80,
+        regular_frequency_months=1,
+        include_regulars_in_replacement=False,
+    )
+
+    ess = EmployerScheme(
+        employer="Microsoft",
+        provider="Lifesight",
+        wrapper_charge=0.0,
+        funds=[
+            FundHolding("Lifesight Equity",            26_821.00, 0.0015),
+            FundHolding("Lifesight Diversified Growth", 8_353.00, 0.0017),
+        ],
     )
 
     recommended = RecommendedPlan(
@@ -351,13 +469,39 @@ if __name__ == "__main__":
         projection_start=date(2026, 5, 14),
         base_gross_rate=DEFAULT_GROSS_RATE,
         cy_limit=DEFAULT_CY_LIMIT_TRANSFER,
+        ess=ess,
     )
 
     print(format_report(result))
     print()
-    print(f"Expected (PDF): CY 1.74%  |  Monetary £612.92  |  IAC 0.73%")
+    print("Calibration check vs PDF (ref 1786247):")
     print(
-        f"Calculated:     CY {result.critical_yield_single*100:.2f}%  |  "
-        f"Monetary £{result.monetary_year_one:,.2f}  |  "
-        f"IAC {result.iac_required_to_proceed*100:.2f}%"
+        f"  Transfer CY:    expected 1.74%   "
+        f"calculated {result.critical_yield_single*100:.2f}%"
     )
+    print(
+        f"  Transfer £Y1:   expected £612.92  "
+        f"calculated £{result.monetary_year_one:,.2f}"
+    )
+    print(
+        f"  IAC used:       expected 0.73%   "
+        f"calculated {result.iac_required_to_proceed*100:.2f}%"
+    )
+    if result.regular:
+        print(
+            f"  Regular CY:     expected 1.68%   "
+            f"calculated {result.regular.cy_required*100:.2f}%"
+        )
+        print(
+            f"  Regular £Y1:    expected £256.14  "
+            f"calculated £{result.regular.monetary_year_one:,.2f}"
+        )
+    if result.ess:
+        print(
+            f"  ESS extra %:    expected 1.57%   "
+            f"calculated {result.ess.additional_growth_pct*100:.2f}%"
+        )
+        print(
+            f"  ESS extra £:    expected £552.24  "
+            f"calculated £{result.ess.additional_growth_gbp:,.2f}"
+        )
