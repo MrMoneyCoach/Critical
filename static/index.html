@@ -3,7 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>SJP ESS Extraction Tool</title>
+<title>SJP — ESS Extraction Tool</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
 <style>
   :root {
     --navy: #1b2541;
@@ -21,89 +23,102 @@
     color: #222;
   }
   header {
-    background: var(--navy);
-    color: white;
-    padding: 16px 28px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
+    background: var(--navy); color: white;
+    padding: 14px 24px;
+    display: flex; align-items: center; justify-content: space-between;
   }
-  header h1 { font-size: 18px; margin: 0; font-weight: 600; }
+  header h1 { font-size: 17px; margin: 0; font-weight: 600; }
   header .status { font-size: 12px; opacity: 0.85; }
-  main { max-width: 1100px; margin: 24px auto; padding: 0 24px; }
+  main { max-width: 1200px; margin: 22px auto; padding: 0 22px; }
   .card {
-    background: white;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 22px 24px;
-    margin-bottom: 20px;
+    background: white; border: 1px solid var(--border);
+    border-radius: 8px; padding: 20px 22px; margin-bottom: 18px;
   }
   .card h2 {
-    margin: 0 0 16px;
-    font-size: 16px;
-    color: var(--navy);
+    margin: 0 0 14px; font-size: 16px; color: var(--navy);
     border-bottom: 2px solid var(--teal);
-    padding-bottom: 6px;
-    display: inline-block;
+    padding-bottom: 5px; display: inline-block;
   }
   .drop {
-    border: 2px dashed var(--border);
-    border-radius: 8px;
-    padding: 40px 20px;
-    text-align: center;
-    cursor: pointer;
+    border: 2px dashed var(--border); border-radius: 8px;
+    padding: 34px 18px; text-align: center; cursor: pointer;
     transition: 0.15s;
   }
   .drop.dragging { border-color: var(--teal); background: #f0fcfc; }
-  .drop p { margin: 6px 0; color: #666; }
+  .drop p { margin: 4px 0; color: #666; font-size: 13px; }
   input[type=file] { display: none; }
   button {
-    background: var(--navy);
-    color: white;
-    border: 0;
-    padding: 10px 18px;
-    border-radius: 6px;
-    font-size: 14px;
-    cursor: pointer;
-    font-weight: 500;
+    background: var(--navy); color: white; border: 0;
+    padding: 9px 16px; border-radius: 6px;
+    font-size: 13px; cursor: pointer; font-weight: 500;
   }
   button:hover:not(:disabled) { background: #2a3a66; }
   button:disabled { opacity: 0.5; cursor: not-allowed; }
   button.secondary { background: white; color: var(--navy); border: 1px solid var(--border); }
+  button.danger { background: var(--red); }
+  /* Viewer */
+  .viewer-wrap {
+    border: 1px solid var(--border); border-radius: 6px;
+    background: #e9ecf1; padding: 14px;
+    max-height: 650px; overflow-y: auto;
+  }
+  .pdf-page {
+    position: relative; margin: 0 auto 14px;
+    background: white;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.12);
+  }
+  .pdf-page canvas { display: block; }
+  .pdf-page .overlay {
+    position: absolute; top: 0; left: 0;
+    cursor: crosshair;
+    user-select: none;
+  }
+  .pdf-page .overlay.move-mode { cursor: default; }
+  .redact-rect {
+    position: absolute;
+    background: rgba(0,0,0,0.78);
+    border: 1px dashed rgba(255,255,255,0.4);
+  }
+  .redact-rect .del {
+    position: absolute; top: -10px; right: -10px;
+    width: 20px; height: 20px; border-radius: 50%;
+    background: var(--red); color: white;
+    font-size: 12px; line-height: 20px; text-align: center;
+    cursor: pointer; border: 2px solid white;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+  }
+  .toolbar {
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 12px; flex-wrap: wrap;
+    padding: 10px 14px; background: #fafbfc;
+    border: 1px solid var(--border); border-radius: 6px;
+  }
+  .toolbar .count {
+    margin-left: auto; font-size: 12px; color: #666;
+  }
   .row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
   .row.three { grid-template-columns: 1fr 1fr 1fr; }
   label { display: block; font-size: 12px; color: #555; margin-bottom: 4px; font-weight: 500; }
   input[type=text], input[type=number], input[type=date] {
-    width: 100%;
-    padding: 8px 10px;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    font-size: 14px;
-    font-family: inherit;
+    width: 100%; padding: 8px 10px;
+    border: 1px solid var(--border); border-radius: 6px;
+    font-size: 14px; font-family: inherit;
   }
   input.missing { border-color: var(--red); background: #fff4f4; }
-  .fund-row { display: grid; grid-template-columns: 2fr 1fr 1fr auto; gap: 10px; align-items: end; margin-bottom: 8px; }
+  .fund-row {
+    display: grid; grid-template-columns: 2fr 1fr 1fr auto;
+    gap: 10px; align-items: end; margin-bottom: 8px;
+  }
   .fund-row button { padding: 6px 10px; font-size: 12px; background: #eee; color: #444; }
-  .pill { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; margin: 2px 4px 2px 0; }
+  .pill {
+    display: inline-block; padding: 2px 8px;
+    border-radius: 10px; font-size: 11px; margin: 2px 4px 2px 0;
+  }
   .pill.warn { background: #fff4e0; color: #a05c00; }
   .pill.ok { background: #e0f5e9; color: var(--green); }
-  pre.preview {
-    background: #f7f7f9;
-    border: 1px solid var(--border);
-    padding: 12px;
-    border-radius: 6px;
-    font-size: 11px;
-    max-height: 180px;
-    overflow: auto;
-    white-space: pre-wrap;
-    line-height: 1.4;
-  }
-  pre.preview mark { background: #ffe28a; padding: 0 2px; border-radius: 2px; }
   .result-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 18px 28px;
-    margin-top: 8px;
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: 16px 26px; margin-top: 6px;
   }
   .result-grid .label { font-size: 12px; color: #666; }
   .result-grid .value { font-size: 18px; font-weight: 600; color: var(--navy); }
@@ -127,36 +142,38 @@
 </header>
 
 <main>
-  <!-- Upload card -->
+  <!-- 1. Upload -->
   <section class="card">
     <h2>1. Upload pension document</h2>
     <p style="font-size: 13px; color: #555; margin-top: 0;">
-      PDF only. Personal information (name, DOB, account numbers) is redacted
-      locally before any text is sent to Claude for field extraction.
+      Drop a PDF — it loads into the viewer below. Nothing leaves your browser until you click <em>Send to Claude</em>.
     </p>
     <div class="drop" id="drop">
       <p><strong>Drop a PDF here, or click to browse</strong></p>
-      <p>Supports SJP CYC reports, illustrations, and ESS statements</p>
+      <p>SJP CYC reports, illustrations, ESS statements</p>
       <input type="file" id="file" accept="application/pdf">
     </div>
     <div id="upload-meta" class="hint hidden"></div>
-    <div style="margin-top: 14px;">
-      <label>Advisor / Partner name (to preserve when redacting)</label>
-      <input type="text" id="advisor" placeholder="e.g. Scott Mackey" style="max-width: 320px;">
+  </section>
+
+  <!-- 2. PDF viewer + redaction -->
+  <section class="card hidden" id="viewer-card">
+    <h2>2. Mark sensitive areas to redact</h2>
+    <p style="font-size: 13px; color: #555; margin-top: 0;">
+      Click and drag on any page to draw a black-out rectangle. Click the red × on a rectangle to remove it.
+      When you're happy, hit <em>Apply &amp; send to Claude</em> — the redactions get baked in before the PDF leaves your machine.
+    </p>
+    <div class="toolbar">
+      <button id="clear-all" class="secondary" type="button">Clear all rectangles</button>
+      <span class="count"><strong id="rect-count">0</strong> redaction rectangles drawn</span>
     </div>
+    <div class="viewer-wrap" id="viewer"></div>
     <div style="margin-top: 14px;">
-      <button id="extract-btn" disabled>Extract fields</button>
+      <button id="extract-btn">Apply &amp; send to Claude</button>
     </div>
   </section>
 
-  <!-- Redaction preview -->
-  <section class="card hidden" id="redaction-card">
-    <h2>2. Redaction preview</h2>
-    <div id="redaction-summary"></div>
-    <pre class="preview" id="redaction-preview"></pre>
-  </section>
-
-  <!-- Extracted fields -->
+  <!-- 3. Extracted fields -->
   <section class="card hidden" id="fields-card">
     <h2>3. Review &amp; confirm extracted fields</h2>
     <div id="missing-banner"></div>
@@ -200,7 +217,7 @@
     </div>
   </section>
 
-  <!-- Results -->
+  <!-- 4. Results -->
   <section class="card hidden" id="results-card">
     <h2>4. Results</h2>
     <div id="results-body"></div>
@@ -208,17 +225,29 @@
 </main>
 
 <script>
+// =========================================================================
+// Setup
+// =========================================================================
 const $ = id => document.getElementById(id);
-let uploadedFile = null;
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
-// --- Health -------------------------------------------------------------
+const RENDER_SCALE = 1.5;
+let originalPdfBytes = null;     // Uint8Array of uploaded PDF
+let pageStates = [];             // [{canvas, overlay, viewportSize, rects: [{x,y,w,h}]}]
+
+// =========================================================================
+// Health check
+// =========================================================================
 fetch("/api/health").then(r => r.json()).then(j => {
   $("status").textContent = j.claude_api_key_set
     ? "Claude API ready"
     : "Warning: ANTHROPIC_API_KEY not set — extraction will fail";
 });
 
-// --- Upload UI ----------------------------------------------------------
+// =========================================================================
+// Upload
+// =========================================================================
 const drop = $("drop"), fileInput = $("file");
 drop.addEventListener("click", () => fileInput.click());
 drop.addEventListener("dragover", e => { e.preventDefault(); drop.classList.add("dragging"); });
@@ -231,61 +260,187 @@ fileInput.addEventListener("change", e => {
   if (e.target.files[0]) setFile(e.target.files[0]);
 });
 
-function setFile(f) {
-  if (!f.name.toLowerCase().endsWith(".pdf")) {
-    alert("PDFs only."); return;
-  }
-  uploadedFile = f;
+async function setFile(f) {
+  if (!f.name.toLowerCase().endsWith(".pdf")) { alert("PDFs only."); return; }
   const meta = $("upload-meta");
   meta.classList.remove("hidden");
-  meta.textContent = `${f.name} (${(f.size/1024).toFixed(1)} KB)`;
-  $("extract-btn").disabled = false;
+  meta.textContent = `${f.name} (${(f.size/1024).toFixed(1)} KB) — rendering…`;
+
+  originalPdfBytes = new Uint8Array(await f.arrayBuffer());
+  await renderPdf(originalPdfBytes);
+
+  meta.textContent = `${f.name} (${(f.size/1024).toFixed(1)} KB) — ready to redact`;
+  $("viewer-card").classList.remove("hidden");
+  $("viewer-card").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
-// --- Extraction ---------------------------------------------------------
+// =========================================================================
+// Render PDF into the viewer
+// =========================================================================
+async function renderPdf(bytes) {
+  const viewer = $("viewer");
+  viewer.innerHTML = "";
+  pageStates = [];
+
+  const pdf = await pdfjsLib.getDocument({ data: bytes.slice() }).promise;
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const viewport = page.getViewport({ scale: RENDER_SCALE });
+
+    const wrap = document.createElement("div");
+    wrap.className = "pdf-page";
+    wrap.style.width = `${viewport.width}px`;
+    wrap.style.height = `${viewport.height}px`;
+
+    const canvas = document.createElement("canvas");
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    const ctx = canvas.getContext("2d");
+    wrap.appendChild(canvas);
+
+    const overlay = document.createElement("div");
+    overlay.className = "overlay";
+    overlay.style.width = `${viewport.width}px`;
+    overlay.style.height = `${viewport.height}px`;
+    wrap.appendChild(overlay);
+
+    viewer.appendChild(wrap);
+    await page.render({ canvasContext: ctx, viewport }).promise;
+
+    const state = {
+      pageIndex: i - 1,
+      canvas, overlay,
+      viewportWidth: viewport.width,
+      viewportHeight: viewport.height,
+      rects: [],
+    };
+    attachDrawHandlers(overlay, state);
+    pageStates.push(state);
+  }
+  updateCount();
+}
+
+// =========================================================================
+// Drawing logic
+// =========================================================================
+function attachDrawHandlers(overlay, state) {
+  let drawing = null;
+  overlay.addEventListener("mousedown", e => {
+    if (e.target !== overlay) return;        // ignore clicks on existing rects
+    const r = overlay.getBoundingClientRect();
+    const startX = e.clientX - r.left;
+    const startY = e.clientY - r.top;
+    const el = document.createElement("div");
+    el.className = "redact-rect";
+    el.style.left = `${startX}px`;
+    el.style.top = `${startY}px`;
+    overlay.appendChild(el);
+    drawing = { startX, startY, el };
+    e.preventDefault();
+  });
+  window.addEventListener("mousemove", e => {
+    if (!drawing) return;
+    const r = overlay.getBoundingClientRect();
+    const x = Math.max(0, Math.min(state.viewportWidth, e.clientX - r.left));
+    const y = Math.max(0, Math.min(state.viewportHeight, e.clientY - r.top));
+    const w = Math.abs(x - drawing.startX);
+    const h = Math.abs(y - drawing.startY);
+    drawing.el.style.left = `${Math.min(x, drawing.startX)}px`;
+    drawing.el.style.top = `${Math.min(y, drawing.startY)}px`;
+    drawing.el.style.width = `${w}px`;
+    drawing.el.style.height = `${h}px`;
+  });
+  window.addEventListener("mouseup", () => {
+    if (!drawing) return;
+    const el = drawing.el;
+    const w = parseFloat(el.style.width) || 0;
+    const h = parseFloat(el.style.height) || 0;
+    if (w < 6 || h < 6) {
+      el.remove();
+    } else {
+      const rect = {
+        el,
+        x: parseFloat(el.style.left),
+        y: parseFloat(el.style.top),
+        w, h,
+      };
+      const del = document.createElement("span");
+      del.className = "del";
+      del.textContent = "×";
+      del.onclick = ev => { ev.stopPropagation(); el.remove();
+        state.rects = state.rects.filter(r => r !== rect); updateCount(); };
+      el.appendChild(del);
+      state.rects.push(rect);
+      updateCount();
+    }
+    drawing = null;
+  });
+}
+
+function updateCount() {
+  const total = pageStates.reduce((n, s) => n + s.rects.length, 0);
+  $("rect-count").textContent = total;
+}
+
+$("clear-all").addEventListener("click", () => {
+  pageStates.forEach(s => {
+    s.rects.forEach(r => r.el.remove());
+    s.rects = [];
+  });
+  updateCount();
+});
+
+// =========================================================================
+// Bake redactions into the PDF, then send to Claude
+// =========================================================================
 $("extract-btn").addEventListener("click", async () => {
-  if (!uploadedFile) return;
   const btn = $("extract-btn");
   btn.disabled = true;
-  btn.innerHTML = '<span class="spinner"></span>Extracting…';
+  btn.innerHTML = '<span class="spinner"></span>Baking redactions…';
+
   try {
+    // 1. For each page, draw rects onto a fresh canvas copy and export as JPEG.
+    const pageImages = pageStates.map(s => {
+      const c = document.createElement("canvas");
+      c.width = s.canvas.width;
+      c.height = s.canvas.height;
+      const ctx = c.getContext("2d");
+      ctx.drawImage(s.canvas, 0, 0);
+      ctx.fillStyle = "black";
+      s.rects.forEach(r => ctx.fillRect(r.x, r.y, r.w, r.h));
+      return c.toDataURL("image/jpeg", 0.82);
+    });
+
+    // 2. Build a new image-only PDF using pdf-lib.
+    btn.innerHTML = '<span class="spinner"></span>Sending to Claude…';
+    const { PDFDocument } = PDFLib;
+    const newPdf = await PDFDocument.create();
+    for (const dataUrl of pageImages) {
+      const jpgBytes = await fetch(dataUrl).then(r => r.arrayBuffer());
+      const img = await newPdf.embedJpg(jpgBytes);
+      const page = newPdf.addPage([img.width, img.height]);
+      page.drawImage(img, { x: 0, y: 0, width: img.width, height: img.height });
+    }
+    const redactedBytes = await newPdf.save();
+
+    // 3. POST the redacted PDF.
     const fd = new FormData();
-    fd.append("file", uploadedFile);
-    const url = new URL("/api/extract", location.origin);
-    if ($("advisor").value) url.searchParams.set("advisor_name", $("advisor").value);
-    const res = await fetch(url, { method: "POST", body: fd });
+    fd.append("file", new Blob([redactedBytes], { type: "application/pdf" }), "redacted.pdf");
+    const res = await fetch("/api/extract_redacted", { method: "POST", body: fd });
     if (!res.ok) throw new Error(await res.text());
     const data = await res.json();
-    showRedaction(data.redaction);
     showFields(data.fields, data.missing_fields, data.notes);
   } catch (err) {
     alert("Extraction failed: " + err.message);
   } finally {
     btn.disabled = false;
-    btn.textContent = "Extract fields";
+    btn.textContent = "Apply & send to Claude";
   }
 });
 
-// --- Redaction preview --------------------------------------------------
-function showRedaction(r) {
-  $("redaction-card").classList.remove("hidden");
-  const summary = $("redaction-summary");
-  const items = Object.entries(r.items_redacted)
-    .map(([k, v]) => `<span class="pill ok">${k} × ${v}</span>`).join("") || "—";
-  summary.innerHTML = `
-    <p style="font-size:13px;margin:0 0 8px;">
-      Detected client: <strong>${r.client_name_detected || "(none)"}</strong>
-    </p>
-    <div>${items}</div>
-    <p class="hint">Preview below — this is what Claude sees:</p>`;
-  const preview = r.redacted_preview.replace(
-    /\[(CLIENT|DOB|REF|NI_NUMBER|EMAIL|PHONE|POSTCODE|ACCOUNT)\]/g,
-    '<mark>[$1]</mark>'
-  );
-  $("redaction-preview").innerHTML = preview;
-}
-
-// --- Field form ---------------------------------------------------------
+// =========================================================================
+// Field form
+// =========================================================================
 function showFields(fields, missing, notes) {
   $("fields-card").classList.remove("hidden");
 
@@ -293,7 +448,7 @@ function showFields(fields, missing, notes) {
   if (missing && missing.length) {
     banner.innerHTML = `<div style="background:#fff4e0;border:1px solid #f0c98a;
       padding:10px;border-radius:6px;font-size:13px;margin-bottom:14px;">
-      <strong>Missing fields the model couldn't extract:</strong>
+      <strong>Fields Claude couldn't extract:</strong>
       ${missing.map(m => `<span class="pill warn">${m}</span>`).join("")}
       </div>`;
   } else {
@@ -307,13 +462,11 @@ function showFields(fields, missing, notes) {
   $("regular-monthly").value = fields.regular_contribution_monthly ?? 0;
   $("projstart").value = new Date().toISOString().slice(0, 10);
 
-  // Funds
   const fundsDiv = $("funds");
   fundsDiv.innerHTML = "";
   (fields.funds || []).forEach(addFundRow);
   if (!(fields.funds || []).length) addFundRow();
 
-  // Mark missing as red
   const missingSet = new Set((missing || []).map(s => s.toLowerCase()));
   [
     ["plan_name", "plan-name"],
@@ -323,6 +476,8 @@ function showFields(fields, missing, notes) {
   ].forEach(([k, id]) => {
     if (missingSet.has(k)) $(id).classList.add("missing");
   });
+
+  $("fields-card").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function pct(v) {
@@ -343,7 +498,9 @@ function addFundRow(fund) {
 }
 $("add-fund").addEventListener("click", () => addFundRow());
 
-// --- Calculation --------------------------------------------------------
+// =========================================================================
+// Calculate
+// =========================================================================
 $("calc-btn").addEventListener("click", async () => {
   const funds = [...document.querySelectorAll("#funds .fund-row")].map(r => ({
     name: r.querySelector(".f-name").value,

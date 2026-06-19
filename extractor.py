@@ -1,19 +1,25 @@
 """
 ESS field extractor.
 
-Pipeline:
-  1. PDF -> text (pdfplumber, local)
-  2. Redact PII (regex, local)
-  3. Send redacted text to Claude with a structured-output tool schema
-  4. Return a typed dict of extracted fields + a list of fields the model
-     couldn't find with high confidence (so the UI can prompt the user)
+Two extraction paths:
+
+  1. extract_from_text() — local PDF text extraction + regex redaction +
+     Claude API. Used by the legacy auto-redact flow.
+
+  2. extract_from_pdf_bytes() — sends a pre-redacted PDF directly to Claude
+     as a document content block. Used by the interactive viewer where the
+     user has already burned in their own redaction rectangles.
+
+Either way the result is a structured dict of ESS fields plus a list of
+fields the model couldn't extract with confidence.
 """
 
 from __future__ import annotations
 
+import base64
 import json
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from pypdf import PdfReader
@@ -200,6 +206,88 @@ def extract_from_text(
         missing_fields=missing,
         notes=notes,
         redaction=redaction,
+        model_used=model,
+        raw_response=response,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Direct PDF path — for the interactive viewer flow.
+# ---------------------------------------------------------------------------
+
+def extract_from_pdf_bytes(
+    pdf_bytes: bytes,
+    model: str = DEFAULT_MODEL,
+) -> ExtractionResult:
+    """Send a pre-redacted PDF straight to Claude as a document block.
+
+    Assumes the caller (the browser viewer) has already burned redaction
+    rectangles into the PDF, so no further local redaction is performed.
+    """
+    if Anthropic is None:
+        raise ExtractorError("anthropic SDK not installed.")
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        raise ExtractorError("ANTHROPIC_API_KEY environment variable is not set.")
+
+    encoded = base64.standard_b64encode(pdf_bytes).decode()
+
+    client = Anthropic()
+    response = client.messages.create(
+        model=model,
+        max_tokens=2048,
+        tools=[EXTRACTION_TOOL],
+        tool_choice={"type": "tool", "name": "record_ess_fields"},
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "document",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "application/pdf",
+                            "data": encoded,
+                        },
+                    },
+                    {
+                        "type": "text",
+                        "text": (
+                            "Extract the Employer Sponsored Scheme details "
+                            "from this pension document. Black rectangles in "
+                            "the document are redactions — do not attempt to "
+                            "guess what is underneath them. Fund charges are "
+                            "decimals (0.0035 = 0.35%). Monetary values are "
+                            "GBP without currency symbols or commas. Call "
+                            "the record_ess_fields tool exactly once."
+                        ),
+                    },
+                ],
+            }
+        ],
+    )
+
+    tool_block = next(
+        (b for b in response.content if getattr(b, "type", None) == "tool_use"),
+        None,
+    )
+    if tool_block is None:
+        raise ExtractorError("Model did not return a tool_use block.")
+
+    payload = tool_block.input
+    missing = payload.pop("missing_fields", [])
+    notes = payload.pop("notes", [])
+
+    # No local redaction in this path — the user did it visually.
+    from redactor import RedactionReport
+    return ExtractionResult(
+        fields=payload,
+        missing_fields=missing,
+        notes=notes,
+        redaction=RedactionReport(
+            text="(visual redaction applied in browser)",
+            items_redacted={},
+            client_name_detected=None,
+        ),
         model_used=model,
         raw_response=response,
     )

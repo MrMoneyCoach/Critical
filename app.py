@@ -34,7 +34,7 @@ from critical_yield import (
     DEFAULT_GROSS_RATE,
     run_cyc,
 )
-from extractor import ExtractorError, extract_from_pdf
+from extractor import ExtractorError, extract_from_pdf, extract_from_pdf_bytes
 
 
 BASE_DIR = Path(__file__).parent
@@ -99,6 +99,24 @@ async def api_extract(
             "items_redacted": result.redaction.items_redacted,
             "redacted_preview": result.redaction.text[:2000],
         },
+        "model_used": result.model_used,
+    }
+
+
+@app.post("/api/extract_redacted")
+async def api_extract_redacted(file: UploadFile = File(...)) -> dict[str, Any]:
+    """Accept a PDF that the user has already redacted in the browser viewer."""
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(400, "Only PDF uploads are supported")
+    pdf_bytes = await file.read()
+    try:
+        result = extract_from_pdf_bytes(pdf_bytes)
+    except ExtractorError as e:
+        raise HTTPException(503, str(e))
+    return {
+        "fields": result.fields,
+        "missing_fields": result.missing_fields,
+        "notes": result.notes,
         "model_used": result.model_used,
     }
 
